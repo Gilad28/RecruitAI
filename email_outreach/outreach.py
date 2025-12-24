@@ -321,7 +321,7 @@ def was_email_sent(email: str, log: Dict) -> bool:
 @click.option('--delay', type=float, default=30.0, help='Delay between emails in seconds')
 @click.option('--company', '-c', multiple=True, help='Only send to specific companies')
 @click.option('--add-ps', is_flag=True, help='Add P.S. about this being a custom-built tool with GitHub link')
-@click.option('--github-url', default='https://github.com/giladheitner/RecruitAI', help='GitHub repo URL for the P.S.')
+@click.option('--github-url', default='https://github.com/Gilad28/RecruitAI', help='GitHub repo URL for the P.S.')
 def main(resume, recruiters, preview, do_send, use_template, your_name, your_email, limit, delay, company, add_ps, github_url):
     """Send personalized outreach emails to recruiters."""
     
