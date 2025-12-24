@@ -1,0 +1,33 @@
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Environment files (contain secrets)
+.env
+.env.local
+
+# Output files (regeneratable)
+*.db
+emails_found.csv
+sent_emails.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Debug/test artifacts
+debug_*.html
+debug_*.png
+test_*.csv
+*.log
+

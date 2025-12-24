@@ -1,0 +1,13 @@
+# Core
+pandas>=2.0.0
+python-dotenv>=1.0.0
+
+# Resume parsing
+PyPDF2>=3.0.0
+
+# LLM
+openai>=1.0.0
+
+# CLI
+rich>=13.0.0
+click>=8.0.0
