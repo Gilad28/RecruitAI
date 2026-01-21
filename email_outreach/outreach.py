@@ -15,11 +15,16 @@ import csv
 import json
 import smtplib
 import ssl
+import socket
+import dns.resolver
+import logging
 from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from datetime import datetime
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 import time
 
 from dotenv import load_dotenv
@@ -34,6 +39,28 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 load_dotenv()
 
 console = Console()
+
+# ============================================================================
+# Company/Internship Details
+# ============================================================================
+
+# Details about internship companies - update these with actual information
+INTERNSHIP_DETAILS = {
+    'worknet': {
+        'name': 'Worknet.ai',
+        'website': 'https://worknet.ai',
+        'description': 'AI-powered recruitment platform',
+        'funding': '$X million',  # Update with actual funding amount
+        'work': 'Built production GenAI chatbots and AI agents'  # Update with specific work done
+    },
+    'lettuce': {
+        'name': 'Lettuce',
+        'website': 'https://lettuce.com',  # Update with actual website
+        'description': 'AI company',  # Update with actual description
+        'funding': '$X million',  # Update with actual funding amount
+        'work': 'Developed AI applications using LangChain and OpenAI APIs'  # Update with specific work done
+    }
+}
 
 # ============================================================================
 # Resume Parsing
@@ -90,6 +117,15 @@ def generate_email_with_llm(
 ) -> Dict[str, str]:
     """Generate personalized email using OpenAI or Anthropic API."""
     
+    # Build internship details text
+    worknet = INTERNSHIP_DETAILS['worknet']
+    lettuce = INTERNSHIP_DETAILS['lettuce']
+    internship_details = f"""
+INTERNSHIP EXPERIENCE:
+1. {worknet['name']} ({worknet['website']}) - {worknet['description']}, raised {worknet['funding']}. {worknet['work']}.
+2. {lettuce['name']} ({lettuce['website']}) - {lettuce['description']}, raised {lettuce['funding']}. {lettuce['work']}.
+"""
+
     prompt = f"""You are helping a computer science student write a personalized cold outreach email to a recruiter to land an INTERNSHIP.
 
 RECRUITER INFO:
@@ -101,26 +137,40 @@ STUDENT INFO:
 - Name: {your_name}
 - Email: {your_email}
 - Currently pursuing B.S. in Computer Science at Washington State University
+- Just completed Junior year
+- LinkedIn: [Include LinkedIn profile URL]
+- Resume: [Attach resume]
+
+{internship_details}
 
 STUDENT'S RESUME:
 {resume_text[:4000]}
 
 {f"CUSTOM INTRO/CONTEXT: {custom_intro}" if custom_intro else ""}
 
+MAIN ASSETS TO HIGHLIGHT:
+1. References - Two internships at {worknet['name']} and {lettuce['name']} (see details above)
+2. Practical GenAI experience - Built production AI applications, chatbots, and agents
+3. Resourcefulness and attitude - Proactive, self-directed, eager to learn and contribute
+
 Write a professional but warm cold outreach email that:
 1. Has a compelling subject line that mentions the company and internship interest
 2. Opens with a brief, genuine hook about the company (something specific about their product/mission)
-3. Clearly states they are a CS student actively seeking an INTERNSHIP opportunity
-4. Quickly highlights 2-3 relevant skills/experiences (especially their AI/GenAI internship experience at LettuceCo and Worknet.ai)
-5. Shows enthusiasm for learning and contributing at {company_name}
-6. Ends with a soft call-to-action (asking about internship opportunities or a brief chat)
-7. Is concise (under 150 words for the body)
-8. Sounds genuine, eager, and student-appropriate - not overly formal
+3. Clearly states they are a CS student who just completed Junior year, actively seeking an INTERNSHIP opportunity
+4. Highlights the three main assets: (a) References from two internships, (b) Practical GenAI experience building production systems, (c) Resourcefulness and positive attitude
+5. Mentions the internships with brief context about what those companies do and funding raised (keep it concise)
+6. Includes links to resume and LinkedIn profile
+7. Shows enthusiasm for learning and contributing at {company_name}
+8. Ends with a soft call-to-action (asking about internship opportunities or a brief chat)
+9. Is concise (under 200 words for the body)
+10. Sounds genuine, eager, and student-appropriate - not overly formal
+
+IMPORTANT: Include hyperlinks to {worknet['website']} and {lettuce['website']} when mentioning those companies.
 
 Return your response as JSON with these exact keys:
 {{
     "subject": "The email subject line",
-    "body": "The email body (plain text, with proper line breaks)"
+    "body": "The email body (plain text, with proper line breaks and hyperlinks)"
 }}
 
 Only return the JSON, nothing else."""
@@ -224,13 +274,27 @@ def generate_email_template(
     else:
         focus = "full-stack development"
     
+    # Get internship details
+    worknet = INTERNSHIP_DETAILS['worknet']
+    lettuce = INTERNSHIP_DETAILS['lettuce']
+    
     subject = f"CS Student Seeking AI/Software Internship at {company_name}"
+    
+    # Get LinkedIn URL from environment
+    linkedin_url = os.getenv('LINKEDIN_URL', '')
+    linkedin_text = f"\n\nYou can find me on LinkedIn: {linkedin_url}" if linkedin_url else ""
     
     body = f"""Hi {recruiter_name.split()[0] if recruiter_name else 'there'},
 
-I came across your profile and noticed you're part of the talent team at {company_name}. I'm a Computer Science student at Washington State University actively seeking an internship, and I'm genuinely excited about what you're building.
+I came across your profile and noticed you're part of the talent team at {company_name}. I'm a Computer Science student at Washington State University who just completed my Junior year, and I'm actively seeking an internship. I'm genuinely excited about what you're building.
 
-I've already completed two AI internships where I built production chatbots and AI agents using {skills_text}. I'd love to bring that hands-on experience to {company_name} and continue learning from your team.
+I've completed two AI internships that I'm really proud of:
+- {worknet['name']} ({worknet['website']}) - {worknet['description']}, raised {worknet['funding']}. {worknet['work']}.
+- {lettuce['name']} ({lettuce['website']}) - {lettuce['description']}, raised {lettuce['funding']}. {lettuce['work']}.
+
+These experiences gave me hands-on GenAI experience building production systems using {skills_text}, and I'd love to bring that practical knowledge and resourceful attitude to {company_name}.
+
+I've attached my resume.{linkedin_text}
 
 Are there any internship opportunities I should apply for, or would you be open to a quick chat?
 
@@ -238,6 +302,307 @@ Thanks so much,
 {your_name}"""
 
     return {"subject": subject, "body": body}
+
+
+# ============================================================================
+# Email Pattern Generation
+# ============================================================================
+
+def generate_email_patterns(first_name: str, last_name: str, domain: str) -> List[str]:
+    """
+    Generate multiple email pattern variations to try.
+    Given "Gilad Heitner" and "stripe.com", generates:
+    - gilad.heitner@stripe.com
+    - giladheitner@stripe.com
+    - gheitner@stripe.com
+    - giladh@stripe.com
+    - gilad_heitner@stripe.com
+    - gilad@stripe.com
+    - heitner.gilad@stripe.com
+    - hgilad@stripe.com
+    - heitner@stripe.com
+    """
+    first = first_name.lower().strip()
+    last = last_name.lower().strip()
+    
+    if not first or not last:
+        return []
+    
+    patterns = [
+        f"{first}.{last}@{domain}",      # gilad.heitner@
+        f"{first}{last}@{domain}",        # giladheitner@
+        f"{first[0]}{last}@{domain}",     # gheitner@
+        f"{first}{last[0]}@{domain}",     # giladh@
+        f"{first}_{last}@{domain}",       # gilad_heitner@
+        f"{first}@{domain}",              # gilad@
+        f"{last}.{first}@{domain}",       # heitner.gilad@
+        f"{last[0]}{first}@{domain}",     # hgilad@
+        f"{last}@{domain}",               # heitner@
+        f"{first}-{last}@{domain}",       # gilad-heitner@
+        f"{first[0]}.{last}@{domain}",    # g.heitner@
+        f"{first}.{last[0]}@{domain}",    # gilad.h@
+    ]
+    
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_patterns = []
+    for p in patterns:
+        if p not in seen:
+            seen.add(p)
+            unique_patterns.append(p)
+    
+    return unique_patterns
+
+
+def extract_name_parts(recruiter_name: str) -> Tuple[str, str]:
+    """Extract first and last name from a full name."""
+    parts = recruiter_name.strip().split()
+    if len(parts) >= 2:
+        return parts[0], parts[-1]  # First and last
+    elif len(parts) == 1:
+        return parts[0], ""
+    return "", ""
+
+
+# ============================================================================
+# Email Verification
+# ============================================================================
+
+# Import Apollo verifier
+try:
+    from src.apollo_verify import ApolloVerifier
+    APOLLO_AVAILABLE = True
+except ImportError:
+    APOLLO_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("Apollo.io verification not available")
+
+def verify_email(email: str, timeout: int = 10, person_name: Optional[str] = None, company_name: Optional[str] = None) -> Tuple[bool, str]:
+    """
+    Verify if an email address is valid by checking:
+    1. Apollo.io API (if available) - verify person exists
+    2. MX records exist for the domain
+    3. SMTP server accepts the recipient (RCPT TO)
+    
+    Returns: (is_valid, reason)
+    """
+    # Step 0: Try Apollo.io verification first (most reliable)
+    if APOLLO_AVAILABLE and (person_name or company_name):
+        try:
+            apollo = ApolloVerifier()
+            is_valid, reason = apollo.verify_email(email, person_name, company_name)
+            if is_valid:
+                return True, f"Apollo.io: {reason}"
+            # If Apollo says invalid, still check SMTP but note Apollo result
+            apollo_reason = reason
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Apollo.io verification failed: {e}")
+            apollo_reason = None
+    else:
+        apollo_reason = None
+    
+    try:
+        domain = email.split('@')[1]
+    except IndexError:
+        return False, "Invalid email format"
+    
+    # Step 1: Check MX records
+    try:
+        mx_records = dns.resolver.resolve(domain, 'MX')
+        mx_host = str(mx_records[0].exchange).rstrip('.')
+    except dns.resolver.NXDOMAIN:
+        return False, f"Domain {domain} does not exist"
+    except dns.resolver.NoAnswer:
+        return False, f"No MX records for {domain}"
+    except dns.resolver.NoNameservers:
+        return False, f"No nameservers for {domain}"
+    except Exception as e:
+        return False, f"DNS error: {e}"
+    
+    # Step 2: Try SMTP verification
+    try:
+        # Connect to mail server
+        smtp = smtplib.SMTP(timeout=timeout)
+        smtp.connect(mx_host, 25)
+        smtp.helo('gmail.com')
+        smtp.mail('verify@gmail.com')
+        
+        # Check if recipient exists
+        code, message = smtp.rcpt(email)
+        smtp.quit()
+        
+        if code == 250:
+            result_reason = "Valid"
+            if apollo_reason:
+                result_reason += f" (Apollo: {apollo_reason})"
+            return True, result_reason
+        elif code == 550:
+            return False, "Mailbox does not exist"
+        elif code == 553:
+            return False, "Invalid mailbox"
+        else:
+            # Some servers return 252 (cannot verify) - treat as unknown
+            result_reason = f"Unknown (code {code}) - might be valid"
+            if apollo_reason:
+                result_reason += f" (Apollo: {apollo_reason})"
+            return True, result_reason
+            
+    except smtplib.SMTPServerDisconnected:
+        result_reason = "Server disconnected - might be valid"
+        if apollo_reason:
+            result_reason += f" (Apollo: {apollo_reason})"
+        return True, result_reason
+    except smtplib.SMTPConnectError:
+        result_reason = "Cannot connect to verify - might be valid"
+        if apollo_reason:
+            result_reason += f" (Apollo: {apollo_reason})"
+        return True, result_reason
+    except socket.timeout:
+        result_reason = "Timeout - might be valid"
+        if apollo_reason:
+            result_reason += f" (Apollo: {apollo_reason})"
+        return True, result_reason
+    except Exception as e:
+        result_reason = f"Verification inconclusive: {e}"
+        if apollo_reason:
+            result_reason += f" (Apollo: {apollo_reason})"
+        return True, result_reason
+
+
+def batch_verify_emails(emails: List[str], console) -> Dict[str, Tuple[bool, str]]:
+    """Verify multiple emails and return results."""
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+    
+    results = {}
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        console=console
+    ) as progress:
+        task = progress.add_task("Verifying emails...", total=len(emails))
+        
+        for email in emails:
+            progress.update(task, description=f"Verifying {email}...")
+            is_valid, reason = verify_email(email)
+            results[email] = (is_valid, reason)
+            progress.advance(task)
+    
+    return results
+
+
+def find_valid_email_pattern(
+    recruiter_name: str, 
+    original_email: str, 
+    console,
+    max_patterns: int = 8,
+    company_name: Optional[str] = None
+) -> Tuple[Optional[str], str]:
+    """
+    Try multiple email patterns and return the first valid one.
+    
+    Returns: (valid_email or None, status_message)
+    """
+    # Extract domain from original email
+    try:
+        domain = original_email.split('@')[1]
+    except IndexError:
+        return None, "Invalid email format"
+    
+    # First check if original email works
+    is_valid, reason = verify_email(original_email, timeout=5, person_name=recruiter_name, company_name=company_name)
+    if is_valid and "does not exist" not in reason.lower():
+        return original_email, f"Original valid: {reason}"
+    
+    # Extract name parts
+    first_name, last_name = extract_name_parts(recruiter_name)
+    if not first_name or not last_name:
+        # Try to extract from email local part
+        local_part = original_email.split('@')[0]
+        parts = local_part.replace('.', ' ').replace('_', ' ').replace('-', ' ').split()
+        if len(parts) >= 2:
+            first_name, last_name = parts[0], parts[-1]
+        else:
+            return None, "Cannot extract name for pattern generation"
+    
+    # Generate patterns
+    patterns = generate_email_patterns(first_name, last_name, domain)
+    
+    # Remove the original email from patterns (we already checked it)
+    patterns = [p for p in patterns if p.lower() != original_email.lower()][:max_patterns]
+    
+    console.print(f"      [dim]Trying {len(patterns)} patterns for {first_name} {last_name}...[/dim]")
+    
+    # Try each pattern
+    for pattern in patterns:
+        is_valid, reason = verify_email(pattern, timeout=5, person_name=recruiter_name, company_name=company_name)
+        if is_valid and "does not exist" not in reason.lower() and "Mailbox does not exist" not in reason:
+            return pattern, f"Pattern found: {pattern}"
+    
+    return None, f"No valid pattern found (tried {len(patterns) + 1} variations)"
+
+
+def batch_find_valid_emails(
+    recruiters: List[Dict], 
+    console
+) -> Dict[str, Dict]:
+    """
+    For each recruiter, find a valid email pattern.
+    
+    Returns dict mapping original email -> {
+        'valid_email': str or None,
+        'recruiter_name': str,
+        'status': str
+    }
+    """
+    from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+    
+    results = {}
+    
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+        console=console
+    ) as progress:
+        task = progress.add_task("Finding valid emails...", total=len(recruiters))
+        
+        for rec in recruiters:
+            original_email = rec.get('best_email', '')
+            company = rec.get('company_name', '')
+            
+            # Get recruiter name
+            context = rec.get('best_context', '')
+            recruiter_name = ""
+            if "LinkedIn recruiter:" in context:
+                recruiter_name = context.split("LinkedIn recruiter:")[1].split("-")[0].strip()
+            if not recruiter_name:
+                local_part = original_email.split('@')[0]
+                recruiter_name = local_part.replace('.', ' ').replace('_', ' ').title()
+            
+            progress.update(task, description=f"Checking {company}: {recruiter_name}...")
+            
+            valid_email, status = find_valid_email_pattern(
+                recruiter_name, 
+                original_email, 
+                console,
+                company_name=company
+            )
+            
+            results[original_email] = {
+                'valid_email': valid_email,
+                'recruiter_name': recruiter_name,
+                'company': company,
+                'status': status
+            }
+            
+            progress.advance(task)
+    
+    return results
 
 
 # ============================================================================
@@ -250,24 +615,42 @@ def send_email_smtp(
     body: str,
     from_email: str,
     from_name: str,
+    resume_path: Optional[str] = None,
     smtp_server: str = "smtp.gmail.com",
     smtp_port: int = 587,
     smtp_password: Optional[str] = None,
 ) -> bool:
-    """Send email via SMTP."""
+    """Send email via SMTP with optional resume attachment."""
     
     password = smtp_password or os.environ.get('SMTP_PASSWORD') or os.environ.get('GMAIL_APP_PASSWORD')
     if not password:
         raise ValueError("SMTP_PASSWORD or GMAIL_APP_PASSWORD not set in environment")
     
     # Create message
-    msg = MIMEMultipart("alternative")
+    msg = MIMEMultipart()
     msg["Subject"] = subject
     msg["From"] = f"{from_name} <{from_email}>"
     msg["To"] = to_email
     
     # Add plain text body
     msg.attach(MIMEText(body, "plain"))
+    
+    # Attach resume if provided
+    if resume_path and Path(resume_path).exists():
+        try:
+            with open(resume_path, "rb") as attachment:
+                part = MIMEBase('application', 'octet-stream')
+                part.set_payload(attachment.read())
+            
+            encoders.encode_base64(part)
+            resume_filename = Path(resume_path).name
+            part.add_header(
+                'Content-Disposition',
+                f'attachment; filename= {resume_filename}',
+            )
+            msg.attach(part)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not attach resume: {e}[/yellow]")
     
     # Send
     try:
@@ -322,7 +705,9 @@ def was_email_sent(email: str, log: Dict) -> bool:
 @click.option('--company', '-c', multiple=True, help='Only send to specific companies')
 @click.option('--add-ps', is_flag=True, help='Add P.S. about this being a custom-built tool with GitHub link')
 @click.option('--github-url', default='https://github.com/Gilad28/RecruitAI', help='GitHub repo URL for the P.S.')
-def main(resume, recruiters, preview, do_send, use_template, your_name, your_email, limit, delay, company, add_ps, github_url):
+@click.option('--verify/--no-verify', default=True, help='Verify emails before sending (default: verify)')
+@click.option('--skip-invalid', is_flag=True, default=True, help='Skip emails that fail verification')
+def main(resume, recruiters, preview, do_send, use_template, your_name, your_email, limit, delay, company, add_ps, github_url, verify, skip_invalid):
     """Send personalized outreach emails to recruiters."""
     
     console.print(Panel.fit(
@@ -381,6 +766,54 @@ def main(resume, recruiters, preview, do_send, use_template, your_name, your_ema
         recruiters_to_email = recruiters_to_email[:limit]
     
     console.print(f"   [green]✓[/green] Found {len(recruiters_to_email)} recruiters to contact")
+    
+    # Verify emails and try alternative patterns
+    email_updates = {}  # Maps original email -> valid email to use
+    
+    if verify and recruiters_to_email:
+        console.print(f"\n[bold]🔍 Verifying emails & finding valid patterns...[/bold]")
+        
+        validation_results = batch_find_valid_emails(recruiters_to_email, console)
+        
+        # Process results
+        valid_count = 0
+        invalid_count = 0
+        pattern_found_count = 0
+        
+        console.print("\n[bold]Email Verification Results:[/bold]")
+        for original_email, result in validation_results.items():
+            valid_email = result['valid_email']
+            status = result['status']
+            company = result['company']
+            
+            if valid_email:
+                valid_count += 1
+                if valid_email != original_email:
+                    pattern_found_count += 1
+                    console.print(f"   [green]✓[/green] {company}: [yellow]{original_email}[/yellow] → [green]{valid_email}[/green]")
+                    email_updates[original_email] = valid_email
+                else:
+                    console.print(f"   [green]✓[/green] {company}: {original_email}")
+            else:
+                invalid_count += 1
+                console.print(f"   [red]✗[/red] {company}: {original_email} - {status}")
+        
+        console.print(f"\n   [green]✓ Valid:[/green] {valid_count}  [yellow]⟳ Pattern fixed:[/yellow] {pattern_found_count}  [red]✗ Invalid:[/red] {invalid_count}")
+        
+        # Update recruiters with corrected emails
+        for rec in recruiters_to_email:
+            original = rec.get('best_email', '')
+            if original in email_updates:
+                rec['best_email'] = email_updates[original]
+                rec['original_email'] = original  # Keep track of original
+        
+        # Filter out invalid emails if skip_invalid is True
+        if skip_invalid and invalid_count > 0:
+            recruiters_to_email = [
+                r for r in recruiters_to_email 
+                if validation_results.get(r.get('original_email', r.get('best_email', '')), {}).get('valid_email')
+            ]
+            console.print(f"\n   [yellow]Continuing with {len(recruiters_to_email)} verified emails[/yellow]")
     
     # Load sent log
     sent_log = load_sent_log()
@@ -453,7 +886,7 @@ def main(resume, recruiters, preview, do_send, use_template, your_name, your_ema
                 # Add P.S. if requested
                 body = email_content['body']
                 if add_ps:
-                    ps_text = f"\n\nP.S. I built a tool that finds recruiters via LinkedIn, generates personalized emails with GPT, and sends them - that's how I found you and wrote this! I reviewed it before sending. Check it out: {github_url}"
+                    ps_text = f"\n\nP.S. I built a tool that finds recruiters via LinkedIn, generates personalized emails with LLMs (OpenAI), and sends them - that's how I found you and wrote this! I reviewed it before sending. Check it out: {github_url}"
                     body += ps_text
                 
                 emails_to_send.append({
@@ -508,6 +941,7 @@ def main(resume, recruiters, preview, do_send, use_template, your_name, your_ema
                     body=email_data['body'],
                     from_email=your_email,
                     from_name=your_name,
+                    resume_path=resume,
                 )
                 
                 if success:
