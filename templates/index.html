@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RecruitAI</title>
+  <style>
+    * { box-sizing: border-box; }
+    :root {
+      --bg: #0f0f12;
+      --card: #1a1a1f;
+      --border: #2a2a32;
+      --text: #e4e4e7;
+      --muted: #71717a;
+      --accent: #6366f1;
+      --accent-hover: #818cf8;
+      --success: #22c55e;
+      --warn: #eab308;
+    }
+    body {
+      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+    .container { max-width: 900px; margin: 0 auto; padding: 2rem; }
+    h1 { font-size: 1.75rem; margin: 0 0 1.5rem; font-weight: 600; }
+    h2 { font-size: 1rem; margin: 0 0 0.75rem; color: var(--muted); font-weight: 500; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+      margin-bottom: 1rem;
+    }
+    .tabs { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+    .tab {
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid transparent;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { background: var(--accent); color: white; border-color: var(--accent); }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    input, button {
+      font-family: inherit;
+      font-size: 0.9rem;
+    }
+    input[type="text"] {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 0.75rem;
+      color: var(--text);
+      width: 100%;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    .row { display: flex; gap: 0.75rem; margin-bottom: 0.75rem; align-items: center; }
+    .row input { flex: 1; }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      font-weight: 500;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: var(--border); }
+    button.secondary:hover { background: #3a3a45; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th { color: var(--muted); font-weight: 500; }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 500;
+    }
+    .badge.sent { background: rgba(34,197,94,0.2); color: var(--success); }
+    .badge.ready { background: rgba(99,102,241,0.2); color: var(--accent); }
+    .log {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: monospace;
+      font-size: 0.8rem;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .loading { opacity: 0.7; pointer-events: none; }
+    .progress-container {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1rem;
+      display: none;
+    }
+    .progress-bar {
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 0.5rem;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+      transition: width 0.3s ease;
+      border-radius: 4px;
+    }
+    .progress-text {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-bottom: 0.25rem;
+    }
+    .live-logs {
+      max-height: 150px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.5rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>RecruitAI</h1>
+    <div class="tabs">
+      <button class="tab active" data-tab="find">Find Emails</button>
+      <button class="tab" data-tab="recruiters">Recruiters</button>
+      <button class="tab" data-tab="sent">Already Sent</button>
+      <button class="tab" data-tab="send">Send Emails</button>
+    </div>
+
+    <div id="panel-find" class="panel active card">
+      <h2>Find startups & contact info</h2>
+      <div class="row">
+        <input type="text" id="find-query" placeholder="Search query (e.g. AI startup, fintech startup)" value="AI startup">
+      </div>
+      <div class="row">
+        <input type="number" id="find-max" value="50" min="5" max="200" style="max-width: 100px;">
+        <span style="color: var(--muted);">max startups</span>
+      </div>
+      <button id="btn-find">Find Emails</button>
+      <div id="find-progress" class="progress-container">
+        <div class="progress-text" id="find-progress-text">Initializing...</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="find-progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="live-logs" id="find-logs"></div>
+      </div>
+      <div id="find-log" class="log" style="display:none; margin-top: 1rem;"></div>
+    </div>
+
+    <div id="panel-recruiters" class="panel card">
+      <h2>Found recruiters</h2>
+      <p id="recruiters-count" style="color: var(--muted); margin: 0 0 0.75rem;">Loading...</p>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr><th>Company</th><th>Email</th><th>Status</th></tr>
+          </thead>
+          <tbody id="recruiters-table"></tbody>
+        </table>
+      </div>
+      <button class="secondary" id="btn-refresh-recruiters" style="margin-top: 0.75rem;">Refresh</button>
+    </div>
+
+    <div id="panel-sent" class="panel card">
+      <h2>Emails already sent</h2>
+      <p id="sent-count" style="color: var(--muted); margin: 0 0 0.75rem;">Loading...</p>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr><th>Company</th><th>Email</th><th>Date</th></tr>
+          </thead>
+          <tbody id="sent-table"></tbody>
+        </table>
+      </div>
+      <button class="secondary" id="btn-refresh-sent" style="margin-top: 0.75rem;">Refresh</button>
+    </div>
+
+    <div id="panel-send" class="panel card">
+      <h2>Send outreach emails</h2>
+      <div class="row">
+        <input type="number" id="send-limit" value="20" min="1" max="50" style="max-width: 80px;">
+        <span style="color: var(--muted);">emails to send</span>
+      </div>
+      <button id="btn-send">Send Emails</button>
+      <div id="send-progress" class="progress-container">
+        <div class="progress-text" id="send-progress-text">Initializing...</div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="send-progress-fill" style="width: 0%"></div>
+        </div>
+        <div class="live-logs" id="send-logs"></div>
+      </div>
+      <div id="send-log" class="log" style="display:none; margin-top: 1rem;"></div>
+    </div>
+  </div>
+
+  <script>
+    const tabs = document.querySelectorAll('.tab');
+    const panels = document.querySelectorAll('.panel');
+    tabs.forEach(t => {
+      t.addEventListener('click', () => {
+        tabs.forEach(x => x.classList.remove('active'));
+        panels.forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        document.getElementById('panel-' + t.dataset.tab).classList.add('active');
+        if (t.dataset.tab === 'recruiters') loadRecruiters();
+        if (t.dataset.tab === 'sent') loadSent();
+      });
+    });
+
+    async function safeJson(r) {
+      const text = await r.text();
+      if (!text) return {};
+      try { return JSON.parse(text); } catch { return { error: text || 'Empty response' }; }
+    }
+    async function loadRecruiters() {
+      const r = await fetch('/api/recruiters');
+      const d = await safeJson(r);
+      document.getElementById('recruiters-count').textContent = d.total ? d.total + ' recruiters' : (d.error ? 'Error loading' : 'No recruiters yet. Run Find Emails first.');
+      const tbody = document.getElementById('recruiters-table');
+      tbody.innerHTML = '';
+      (d.error ? [] : (d.recruiters || [])).forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${r.company_name || ''}</td>
+          <td>${r.best_email || ''}</td>
+          <td><span class="badge ${r.already_sent ? 'sent' : 'ready'}">${r.already_sent ? 'Already sent' : 'Ready'}</span></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function loadSent() {
+      const r = await fetch('/api/sent');
+      const d = await safeJson(r);
+      document.getElementById('sent-count').textContent = d.total ? d.total + ' emails sent' : (d.error ? 'Error loading' : 'No emails sent yet.');
+      const tbody = document.getElementById('sent-table');
+      tbody.innerHTML = '';
+      (d.error ? [] : (d.sent || [])).forEach(s => {
+        const tr = document.createElement('tr');
+        const date = s.sent_at ? new Date(s.sent_at).toLocaleDateString() : '';
+        tr.innerHTML = `<td>${s.company || ''}</td><td>${s.email || ''}</td><td>${date}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    document.getElementById('btn-refresh-recruiters').addEventListener('click', loadRecruiters);
+    document.getElementById('btn-refresh-sent').addEventListener('click', loadSent);
+
+    document.getElementById('btn-find').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-find');
+      const progressContainer = document.getElementById('find-progress');
+      const progressText = document.getElementById('find-progress-text');
+      const progressFill = document.getElementById('find-progress-fill');
+      const logsDiv = document.getElementById('find-logs');
+      const log = document.getElementById('find-log');
+      
+      btn.disabled = true;
+      progressContainer.style.display = 'block';
+      log.style.display = 'none';
+      progressText.textContent = 'Starting search...';
+      progressFill.style.width = '0%';
+      logsDiv.innerHTML = '';
+      
+      try {
+        const res = await fetch('/api/find', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            query: document.getElementById('find-query').value,
+            max: parseInt(document.getElementById('find-max').value, 10)
+          })
+        });
+        const data = await safeJson(res);
+        const job_id = data.job_id;
+        if (!job_id) {
+          progressText.textContent = 'Error: ' + (data.error || 'No job ID returned');
+          btn.disabled = false;
+          return;
+        }
+        
+        const poll = setInterval(async () => {
+          const s = await fetch('/api/find/status/' + job_id);
+          const st = await safeJson(s);
+          
+          if (st.progress) {
+            const p = st.progress;
+            const pct = p.total_queries > 0 ? Math.round((p.queries / p.total_queries) * 100) : 0;
+            progressFill.style.width = pct + '%';
+            progressText.textContent = `Query ${p.queries}/${p.total_queries} • Found ${p.found}/${p.target} startups`;
+          }
+          
+          if (st.logs && st.logs.length > 0) {
+            logsDiv.innerHTML = st.logs.slice(-10).map(l => 
+              '<div>' + l.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>'
+            ).join('');
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+          }
+          
+          if (st.status === 'done') {
+            clearInterval(poll);
+            progressText.textContent = `Complete! Found ${st.progress?.found || 0} startups`;
+            progressFill.style.width = '100%';
+            btn.disabled = false;
+            loadRecruiters();
+            setTimeout(() => {
+              progressContainer.style.display = 'none';
+            }, 3000);
+          } else if (st.status === 'error') {
+            clearInterval(poll);
+            progressText.textContent = 'Error: ' + (st.error || 'Unknown error');
+            btn.disabled = false;
+          }
+        }, 500);
+      } catch (e) {
+        progressText.textContent = 'Error: ' + e.message;
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById('btn-send').addEventListener('click', async () => {
+      const btn = document.getElementById('btn-send');
+      const progressContainer = document.getElementById('send-progress');
+      const progressText = document.getElementById('send-progress-text');
+      const progressFill = document.getElementById('send-progress-fill');
+      const logsDiv = document.getElementById('send-logs');
+      const log = document.getElementById('send-log');
+      
+      btn.disabled = true;
+      progressContainer.style.display = 'block';
+      log.style.display = 'none';
+      progressText.textContent = 'Starting to send emails...';
+      progressFill.style.width = '0%';
+      logsDiv.innerHTML = '';
+      
+      try {
+        const res = await fetch('/api/send', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ limit: parseInt(document.getElementById('send-limit').value, 10) })
+        });
+        const data = await safeJson(res);
+        const job_id = data.job_id;
+        if (!job_id) {
+          progressText.textContent = 'Error: ' + (data.error || 'No job ID returned');
+          btn.disabled = false;
+          return;
+        }
+        
+        const poll = setInterval(async () => {
+          const s = await fetch('/api/send/status/' + job_id);
+          const st = await safeJson(s);
+          
+          if (st.progress) {
+            const p = st.progress;
+            const pct = p.total > 0 ? Math.round((p.sent / p.total) * 100) : 0;
+            progressFill.style.width = pct + '%';
+            progressText.textContent = `Sent ${p.sent}/${p.total} emails`;
+          }
+          
+          if (st.logs && st.logs.length > 0) {
+            logsDiv.innerHTML = st.logs.slice(-10).map(l => 
+              '<div>' + l.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>'
+            ).join('');
+            logsDiv.scrollTop = logsDiv.scrollHeight;
+          }
+          
+          if (st.status === 'done') {
+            clearInterval(poll);
+            progressText.textContent = `Complete! Sent ${st.progress?.sent || 0} emails`;
+            progressFill.style.width = '100%';
+            btn.disabled = false;
+            loadRecruiters();
+            loadSent();
+            setTimeout(() => {
+              progressContainer.style.display = 'none';
+            }, 3000);
+          } else if (st.status === 'error') {
+            clearInterval(poll);
+            progressText.textContent = 'Error: ' + (st.error || 'Unknown error');
+            btn.disabled = false;
+          }
+        }, 500);
+      } catch (e) {
+        progressText.textContent = 'Error: ' + e.message;
+        btn.disabled = false;
+      }
+    });
+
+    loadRecruiters();
+    loadSent();
+  </script>
+</body>
+</html>
