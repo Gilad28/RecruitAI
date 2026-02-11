@@ -35,8 +35,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-# Load environment variables
-load_dotenv()
+# Load from project root (send_emails.py sets cwd)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 console = Console()
 
@@ -310,17 +310,12 @@ Thanks so much,
 
 def generate_email_patterns(first_name: str, last_name: str, domain: str) -> List[str]:
     """
-    Generate multiple email pattern variations to try.
-    Given "Gilad Heitner" and "stripe.com", generates:
-    - gilad.heitner@stripe.com
-    - giladheitner@stripe.com
-    - gheitner@stripe.com
-    - giladh@stripe.com
-    - gilad_heitner@stripe.com
-    - gilad@stripe.com
-    - heitner.gilad@stripe.com
-    - hgilad@stripe.com
-    - heitner@stripe.com
+    Generate comprehensive email pattern variations to try.
+    Includes all combinations of first name, last name, initials, and separators.
+    Given "Gilad Heitner" and "stripe.com", generates patterns like:
+    - gilad.heitner@, heitner.gilad@, giladheitner@, heitnergilad@
+    - g.heitner@, h.gilad@, gheitner@, hgilad@
+    - And many more variations...
     """
     first = first_name.lower().strip()
     last = last_name.lower().strip()
@@ -328,26 +323,71 @@ def generate_email_patterns(first_name: str, last_name: str, domain: str) -> Lis
     if not first or not last:
         return []
     
+    f = first[0] if first else ''
+    l = last[0] if last else ''
+    
     patterns = [
-        f"{first}.{last}@{domain}",      # gilad.heitner@
-        f"{first}{last}@{domain}",        # giladheitner@
-        f"{first[0]}{last}@{domain}",     # gheitner@
-        f"{first}{last[0]}@{domain}",     # giladh@
-        f"{first}_{last}@{domain}",       # gilad_heitner@
-        f"{first}@{domain}",              # gilad@
-        f"{last}.{first}@{domain}",       # heitner.gilad@
-        f"{last[0]}{first}@{domain}",     # hgilad@
-        f"{last}@{domain}",               # heitner@
-        f"{first}-{last}@{domain}",       # gilad-heitner@
-        f"{first[0]}.{last}@{domain}",    # g.heitner@
-        f"{first}.{last[0]}@{domain}",    # gilad.h@
+        # First.Last variations
+        f"{first}.{last}@{domain}",           # gilad.heitner@
+        f"{first}_{last}@{domain}",           # gilad_heitner@
+        f"{first}-{last}@{domain}",           # gilad-heitner@
+        f"{first}{last}@{domain}",            # giladheitner@
+        
+        # Last.First variations (reversed)
+        f"{last}.{first}@{domain}",          # heitner.gilad@
+        f"{last}_{first}@{domain}",           # heitner_gilad@
+        f"{last}-{first}@{domain}",          # heitner-gilad@
+        f"{last}{first}@{domain}",            # heitnergilad@
+        
+        # Initial + Last variations
+        f"{f}{last}@{domain}",               # gheitner@
+        f"{f}.{last}@{domain}",              # g.heitner@
+        f"{f}_{last}@{domain}",              # g_heitner@
+        f"{f}-{last}@{domain}",              # g-heitner@
+        
+        # Last + Initial variations
+        f"{last}{f}@{domain}",               # heitnerg@
+        f"{last}.{f}@{domain}",              # heitner.g@
+        f"{last}_{f}@{domain}",              # heitner_g@
+        f"{last}-{f}@{domain}",              # heitner-g@
+        
+        # First + Last Initial variations
+        f"{first}{l}@{domain}",              # giladh@
+        f"{first}.{l}@{domain}",             # gilad.h@
+        f"{first}_{l}@{domain}",             # gilad_h@
+        f"{first}-{l}@{domain}",             # gilad-h@
+        
+        # Last Initial + First variations
+        f"{l}{first}@{domain}",              # hgilad@
+        f"{l}.{first}@{domain}",             # h.gilad@
+        f"{l}_{first}@{domain}",             # h_gilad@
+        f"{l}-{first}@{domain}",             # h-gilad@
+        
+        # Initial.Initial variations
+        f"{f}{l}@{domain}",                  # gh@
+        f"{f}.{l}@{domain}",                 # g.h@
+        f"{f}_{l}@{domain}",                 # g_h@
+        f"{f}-{l}@{domain}",                 # g-h@
+        f"{l}{f}@{domain}",                  # hg@
+        f"{l}.{f}@{domain}",                 # h.g@
+        
+        # First name only
+        f"{first}@{domain}",                 # gilad@
+        
+        # Last name only
+        f"{last}@{domain}",                  # heitner@
+        
+        # First.Last with numbers (common for duplicates)
+        f"{first}.{last}1@{domain}",         # gilad.heitner1@
+        f"{first}{last}1@{domain}",          # giladheitner1@
+        f"{first}.{last}2@{domain}",         # gilad.heitner2@
     ]
     
     # Remove duplicates while preserving order
     seen = set()
     unique_patterns = []
     for p in patterns:
-        if p not in seen:
+        if p not in seen and '@' in p:  # Ensure valid email format
             seen.add(p)
             unique_patterns.append(p)
     
@@ -380,27 +420,29 @@ except ImportError:
 def verify_email(email: str, timeout: int = 10, person_name: Optional[str] = None, company_name: Optional[str] = None) -> Tuple[bool, str]:
     """
     Verify if an email address is valid by checking:
-    1. Apollo.io API (if available) - verify person exists
+    1. Apollo.io API (if available) - verify person exists (skipped for generic emails like recruiting@)
     2. MX records exist for the domain
     3. SMTP server accepts the recipient (RCPT TO)
     
     Returns: (is_valid, reason)
     """
-    # Step 0: Try Apollo.io verification first (most reliable)
-    if APOLLO_AVAILABLE and (person_name or company_name):
+    apollo_valid = None
+    apollo_reason = None
+    
+    # Generic role emails (recruiting@, careers@, etc.) - skip Apollo, only use SMTP
+    local = email.split('@')[0].lower() if '@' in email else ''
+    is_generic = local in ('recruiting', 'careers', 'hr', 'talent', 'jobs', 'hiring', 'people')
+    
+    # Step 0: Try Apollo.io verification (skip for generic emails - Apollo looks for people, not roles)
+    if APOLLO_AVAILABLE and not is_generic:
         try:
             apollo = ApolloVerifier()
             is_valid, reason = apollo.verify_email(email, person_name, company_name)
-            if is_valid:
-                return True, f"Apollo.io: {reason}"
-            # If Apollo says invalid, still check SMTP but note Apollo result
+            apollo_valid = is_valid
             apollo_reason = reason
         except Exception as e:
             logger = logging.getLogger(__name__)
             logger.debug(f"Apollo.io verification failed: {e}")
-            apollo_reason = None
-    else:
-        apollo_reason = None
     
     try:
         domain = email.split('@')[1]
@@ -421,6 +463,11 @@ def verify_email(email: str, timeout: int = 10, person_name: Optional[str] = Non
         return False, f"DNS error: {e}"
     
     # Step 2: Try SMTP verification
+    smtp_success = False
+    smtp_code = None
+    smtp_message = None
+    smtp_error = None
+    
     try:
         # Connect to mail server
         smtp = smtplib.SMTP(timeout=timeout)
@@ -432,42 +479,68 @@ def verify_email(email: str, timeout: int = 10, person_name: Optional[str] = Non
         code, message = smtp.rcpt(email)
         smtp.quit()
         
+        smtp_code = code
+        smtp_message = message
+        
         if code == 250:
-            result_reason = "Valid"
-            if apollo_reason:
-                result_reason += f" (Apollo: {apollo_reason})"
-            return True, result_reason
+            smtp_success = True
         elif code == 550:
-            return False, "Mailbox does not exist"
+            # Explicit rejection - mailbox does not exist
+            return False, "Mailbox does not exist (SMTP 550)"
         elif code == 553:
-            return False, "Invalid mailbox"
-        else:
-            # Some servers return 252 (cannot verify) - treat as unknown
-            result_reason = f"Unknown (code {code}) - might be valid"
-            if apollo_reason:
-                result_reason += f" (Apollo: {apollo_reason})"
-            return True, result_reason
+            # Invalid mailbox
+            return False, "Invalid mailbox (SMTP 553)"
             
     except smtplib.SMTPServerDisconnected:
-        result_reason = "Server disconnected - might be valid"
-        if apollo_reason:
-            result_reason += f" (Apollo: {apollo_reason})"
-        return True, result_reason
+        smtp_error = "Server disconnected"
     except smtplib.SMTPConnectError:
-        result_reason = "Cannot connect to verify - might be valid"
-        if apollo_reason:
-            result_reason += f" (Apollo: {apollo_reason})"
-        return True, result_reason
+        smtp_error = "Cannot connect to verify"
     except socket.timeout:
-        result_reason = "Timeout - might be valid"
-        if apollo_reason:
-            result_reason += f" (Apollo: {apollo_reason})"
-        return True, result_reason
+        smtp_error = "Timeout"
     except Exception as e:
-        result_reason = f"Verification inconclusive: {e}"
+        smtp_error = f"SMTP error: {e}"
+    
+    # Decision logic: be strict - require positive confirmation
+    if smtp_success:
+        # SMTP explicitly accepted (code 250)
+        result_reason = "Valid (SMTP 250)"
         if apollo_reason:
-            result_reason += f" (Apollo: {apollo_reason})"
+            result_reason += f" | Apollo: {apollo_reason}"
         return True, result_reason
+    
+    # SMTP was inconclusive or failed
+    if apollo_valid is True:
+        # Apollo says valid, SMTP inconclusive - trust Apollo
+        result_reason = f"Valid (Apollo verified, SMTP inconclusive"
+        if smtp_error:
+            result_reason += f": {smtp_error}"
+        elif smtp_code:
+            result_reason += f", code {smtp_code}"
+        result_reason += ")"
+        return True, result_reason
+    
+    if apollo_valid is False:
+        # Apollo says invalid - reject even if SMTP is inconclusive
+        result_reason = f"Invalid (Apollo: {apollo_reason}"
+        if smtp_error:
+            result_reason += f", SMTP: {smtp_error}"
+        elif smtp_code:
+            result_reason += f", SMTP code {smtp_code}"
+        result_reason += ")"
+        return False, result_reason
+    
+    # No Apollo result, SMTP inconclusive
+    # For generic emails (recruiting@, careers@, etc.), accept if no explicit rejection (550/553)
+    if is_generic and smtp_code not in (550, 553):
+        return True, f"Generic email accepted (MX ok, SMTP: {smtp_code or smtp_error or 'inconclusive'})"
+    result_reason = "Inconclusive verification"
+    if smtp_error:
+        result_reason += f" (SMTP: {smtp_error})"
+    elif smtp_code:
+        result_reason += f" (SMTP code {smtp_code}, not 250)"
+    else:
+        result_reason += " (SMTP check failed)"
+    return False, result_reason
 
 
 def batch_verify_emails(emails: List[str], console) -> Dict[str, Tuple[bool, str]]:
@@ -498,7 +571,7 @@ def find_valid_email_pattern(
     recruiter_name: str, 
     original_email: str, 
     console,
-    max_patterns: int = 8,
+    max_patterns: int = 50,  # Increased to try more patterns
     company_name: Optional[str] = None
 ) -> Tuple[Optional[str], str]:
     """
@@ -514,7 +587,7 @@ def find_valid_email_pattern(
     
     # First check if original email works
     is_valid, reason = verify_email(original_email, timeout=5, person_name=recruiter_name, company_name=company_name)
-    if is_valid and "does not exist" not in reason.lower():
+    if is_valid:
         return original_email, f"Original valid: {reason}"
     
     # Extract name parts
@@ -539,8 +612,8 @@ def find_valid_email_pattern(
     # Try each pattern
     for pattern in patterns:
         is_valid, reason = verify_email(pattern, timeout=5, person_name=recruiter_name, company_name=company_name)
-        if is_valid and "does not exist" not in reason.lower() and "Mailbox does not exist" not in reason:
-            return pattern, f"Pattern found: {pattern}"
+        if is_valid:
+            return pattern, f"Pattern found: {pattern} ({reason})"
     
     return None, f"No valid pattern found (tried {len(patterns) + 1} variations)"
 
@@ -688,6 +761,24 @@ def was_email_sent(email: str, log: Dict) -> bool:
     return email.lower() in [e.get('email', '').lower() for e in log.get('sent', [])]
 
 
+def get_companies_sent_to(log: Dict) -> set:
+    """Get set of company names we've already sent emails to."""
+    return {e.get('company', '').strip() for e in log.get('sent', []) if e.get('company')}
+
+
+def was_company_contacted(company_name: str, log: Dict) -> bool:
+    """Check if we already sent to this company."""
+    sent_companies = get_companies_sent_to(log)
+    return company_name.strip() in sent_companies
+
+
+def get_emails_sent_today(log: Dict) -> int:
+    """Count how many emails were sent today."""
+    today = datetime.now().date().isoformat()
+    return sum(1 for entry in log.get('sent', []) 
+               if entry.get('sent_at', '').startswith(today))
+
+
 # ============================================================================
 # CLI
 # ============================================================================
@@ -707,7 +798,9 @@ def was_email_sent(email: str, log: Dict) -> bool:
 @click.option('--github-url', default='https://github.com/Gilad28/RecruitAI', help='GitHub repo URL for the P.S.')
 @click.option('--verify/--no-verify', default=True, help='Verify emails before sending (default: verify)')
 @click.option('--skip-invalid', is_flag=True, default=True, help='Skip emails that fail verification')
-def main(resume, recruiters, preview, do_send, use_template, your_name, your_email, limit, delay, company, add_ps, github_url, verify, skip_invalid):
+@click.option('--daily-limit', type=int, default=None, help='Maximum emails to send per day (for spreading out sends)')
+@click.option('--yes', 'confirm_send', is_flag=True, help='Skip confirmation and send immediately')
+def main(resume, recruiters, preview, do_send, use_template, your_name, your_email, limit, delay, company, add_ps, github_url, verify, skip_invalid, daily_limit, confirm_send):
     """Send personalized outreach emails to recruiters."""
     
     console.print(Panel.fit(
@@ -761,10 +854,24 @@ def main(resume, recruiters, preview, do_send, use_template, your_name, your_ema
             continue
         
         recruiters_to_email.append(rec)
-    
+
+    # Load sent log early so we can skip already-contacted companies/emails BEFORE verification
+    sent_log = load_sent_log()
+    sent_companies = get_companies_sent_to(sent_log)
+    if sent_companies:
+        console.print(
+            f"\n[dim]Already contacted {len(sent_companies)} companies; will skip them.[/dim]"
+        )
+
+    recruiters_to_email = [
+        r for r in recruiters_to_email
+        if not was_email_sent(r.get('best_email', ''), sent_log)
+        and not was_company_contacted(r.get('company_name', ''), sent_log)
+    ]
+
     if limit:
         recruiters_to_email = recruiters_to_email[:limit]
-    
+
     console.print(f"   [green]✓[/green] Found {len(recruiters_to_email)} recruiters to contact")
     
     # Verify emails and try alternative patterns
@@ -815,9 +922,6 @@ def main(resume, recruiters, preview, do_send, use_template, your_name, your_ema
             ]
             console.print(f"\n   [yellow]Continuing with {len(recruiters_to_email)} verified emails[/yellow]")
     
-    # Load sent log
-    sent_log = load_sent_log()
-    
     # Show table of recruiters
     table = Table(title="Recruiters to Contact")
     table.add_column("Company", style="cyan")
@@ -832,8 +936,19 @@ def main(resume, recruiters, preview, do_send, use_template, your_name, your_ema
     
     console.print(table)
     
-    # Filter out already sent
-    recruiters_to_email = [r for r in recruiters_to_email if not was_email_sent(r.get('best_email', ''), sent_log)]
+    # Filter out already sent emails AND companies
+    sent_companies = get_companies_sent_to(sent_log)
+    console.print(f"\n[dim]Already contacted {len(sent_companies)} companies: {', '.join(sorted(sent_companies)[:10])}{'...' if len(sent_companies) > 10 else ''}[/dim]")
+    
+    recruiters_to_email = [
+        r for r in recruiters_to_email 
+        if not was_email_sent(r.get('best_email', ''), sent_log)
+        and not was_company_contacted(r.get('company_name', ''), sent_log)
+    ]
+    
+    if len(recruiters_to_email) < len([r for r in recruiters_to_email if not was_email_sent(r.get('best_email', ''), sent_log)]):
+        filtered_by_company = len([r for r in recruiters_to_email if not was_email_sent(r.get('best_email', ''), sent_log)]) - len(recruiters_to_email)
+        console.print(f"[yellow]Filtered out {filtered_by_company} recruiters from already-contacted companies[/yellow]")
     
     if not recruiters_to_email:
         console.print("\n[yellow]No new recruiters to contact.[/yellow]")
@@ -924,7 +1039,22 @@ def main(resume, recruiters, preview, do_send, use_template, your_name, your_ema
     
     # Send emails
     if do_send:
-        if not Confirm.ask(f"\n[bold red]Send {len(emails_to_send)} emails?[/bold red]"):
+        # Check daily limit
+        if daily_limit:
+            emails_sent_today = get_emails_sent_today(sent_log)
+            remaining_today = daily_limit - emails_sent_today
+            
+            if remaining_today <= 0:
+                console.print(f"\n[yellow]⚠ Daily limit reached ({daily_limit} emails/day). Already sent {emails_sent_today} today.[/yellow]")
+                console.print("[dim]Run again tomorrow or increase --daily-limit[/dim]")
+                return
+            
+            if len(emails_to_send) > remaining_today:
+                console.print(f"\n[yellow]⚠ Daily limit: {daily_limit} emails/day. Already sent {emails_sent_today} today.[/yellow]")
+                console.print(f"[yellow]Will send {remaining_today} emails now (out of {len(emails_to_send)} total).[/yellow]")
+                emails_to_send = emails_to_send[:remaining_today]
+        
+        if not confirm_send and not Confirm.ask(f"\n[bold red]Send {len(emails_to_send)} emails?[/bold red]"):
             console.print("[yellow]Cancelled.[/yellow]")
             return
         

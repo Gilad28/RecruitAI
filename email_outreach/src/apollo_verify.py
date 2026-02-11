@@ -7,12 +7,12 @@ import logging
 from typing import Optional, Dict, List, Tuple
 import requests
 from dotenv import load_dotenv
-
-load_dotenv()
+from pathlib import Path
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
 
-APOLLO_API_KEY = os.getenv('APOLLO_API_KEY', 'vzdNcPx0YljRv15cZ_rS0w')
+APOLLO_API_KEY = os.getenv('APOLLO_API_KEY')
 APOLLO_API_URL = 'https://api.apollo.io/v1/mixed_people/search'
 
 
@@ -21,6 +21,8 @@ class ApolloVerifier:
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or APOLLO_API_KEY
+        if not self.api_key:
+            raise ValueError("APOLLO_API_KEY not set")
         self.headers = {
             "Content-Type": "application/json",
             "x-api-key": self.api_key
@@ -105,11 +107,14 @@ class ApolloVerifier:
             else:
                 return False, None, "Not found in Apollo.io"
                 
+        except requests.exceptions.HTTPError as e:
+            # Common when API key/plan/payload isn't accepted; don't spam stderr for each email.
+            return False, None, f"Apollo HTTP error: {e}"
         except requests.exceptions.RequestException as e:
-            logger.error(f"Apollo.io API error: {e}")
-            return False, None, f"API error: {str(e)}"
+            logger.debug(f"Apollo.io API error: {e}")
+            return False, None, f"Apollo request error: {str(e)}"
         except Exception as e:
-            logger.error(f"Unexpected error in Apollo.io search: {e}")
+            logger.debug(f"Unexpected error in Apollo.io search: {e}")
             return False, None, f"Error: {str(e)}"
     
     def verify_email(
