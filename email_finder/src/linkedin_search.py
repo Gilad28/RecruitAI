@@ -132,7 +132,8 @@ class LinkedInSearcher:
     
     def find_recruiters(self, company_name: str, domain: str, max_results: int = 10) -> List[Dict]:
         """
-        Find recruiters for a company via LinkedIn search.
+        Find recruiters, CEOs, and founders for a company via LinkedIn search.
+        Prioritizes founders/CEOs for startups.
         
         Returns list of:
         {
@@ -140,60 +141,77 @@ class LinkedInSearcher:
             'last_name': 'Smith',
             'full_name': 'John Smith',
             'linkedin_url': 'linkedin.com/in/...',
-            'emails': ['john.smith@company.com', 'jsmith@company.com', ...]
+            'emails': ['john.smith@company.com', 'jsmith@company.com', ...],
+            'role': 'CEO' | 'Founder' | 'Recruiter'
         }
         """
         if not self.api_key:
             logger.warning("No API key - skipping LinkedIn search")
             return []
         
-        logger.info(f"Searching LinkedIn for recruiters at {company_name}")
+        logger.info(f"Searching LinkedIn for founders/CEOs/recruiters at {company_name}")
         
         all_recruiters = []
         seen_names = set()
         
-        # Search query
-        query = f'{company_name} recruiter LinkedIn'
-        results = self._search(query)
+        # Try multiple searches: CEO/Founder first (preferred for startups), then recruiters
+        search_queries = [
+            (f'{company_name} founder CEO LinkedIn', 'Founder/CEO'),
+            (f'{company_name} recruiter hiring LinkedIn', 'Recruiter'),
+        ]
         
-        for result in results:
-            title = result.get('title', '')
-            url = result.get('url', '')
-            
-            # Only process LinkedIn profile results
-            if 'linkedin.com/in/' not in url:
-                continue
-            
-            name = self._extract_name_from_title(title)
-            if not name:
-                continue
-            
-            first_name, last_name = name
-            name_key = f"{first_name.lower()} {last_name.lower()}"
-            
-            if name_key in seen_names:
-                continue
-            seen_names.add(name_key)
-            
-            emails = self._generate_emails(first_name, last_name, domain)
-            
-            recruiter = {
-                'first_name': first_name,
-                'last_name': last_name,
-                'full_name': f"{first_name} {last_name}",
-                'linkedin_url': url,
-                'emails': emails,
-                'primary_email': emails[0] if emails else '',
-                'source': title[:100],
-            }
-            all_recruiters.append(recruiter)
-            
-            logger.info(f"Found recruiter: {recruiter['full_name']} -> {recruiter['primary_email']}")
-            
+        for query, role_type in search_queries:
             if len(all_recruiters) >= max_results:
                 break
+                
+            results = self._search(query)
         
-        logger.info(f"Found {len(all_recruiters)} recruiters for {company_name}")
+            for result in results:
+                title = result.get('title', '')
+                url = result.get('url', '')
+                
+                # Only process LinkedIn profile results
+                if 'linkedin.com/in/' not in url:
+                    continue
+                
+                name = self._extract_name_from_title(title)
+                if not name:
+                    continue
+                
+                first_name, last_name = name
+                name_key = f"{first_name.lower()} {last_name.lower()}"
+                
+                if name_key in seen_names:
+                    continue
+                seen_names.add(name_key)
+                
+                emails = self._generate_emails(first_name, last_name, domain)
+                
+                # Detect actual role from title
+                title_lower = title.lower()
+                if any(word in title_lower for word in ['ceo', 'chief executive', 'founder', 'co-founder']):
+                    detected_role = 'Founder/CEO'
+                else:
+                    detected_role = role_type
+                
+                recruiter = {
+                    'first_name': first_name,
+                    'last_name': last_name,
+                    'full_name': f"{first_name} {last_name}",
+                    'linkedin_url': url,
+                    'emails': emails,
+                    'primary_email': emails[0] if emails else '',
+                    'source': title[:100],
+                    'role': detected_role,
+                }
+                all_recruiters.append(recruiter)
+                
+                logger.info(f"Found {detected_role}: {recruiter['full_name']} -> {recruiter['primary_email']}")
+                
+                if len(all_recruiters) >= max_results:
+                    break
+        
+        logger.info(f"Found {len(all_recruiters)} contacts for {company_name}")
         return all_recruiters
     
     def __enter__(self):
