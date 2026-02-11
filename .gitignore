@@ -15,7 +15,7 @@ __pycache__/
 
 # Output files (regeneratable)
 *.db
-emails_found.csv
+*.csv
 sent_emails.json
 
 # IDE
